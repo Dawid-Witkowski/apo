@@ -1,10 +1,10 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, RIGHT, Y
-
+from tkinter import filedialog, messagebox, simpledialog
 import numpy as np
 from PIL import Image, ImageTk
 import statistics
 import cv2
+from typing import Any
 
 
 class ImageViewer:
@@ -47,6 +47,7 @@ class ImageViewer:
         point_ops_menu = tk.Menu(self.menu)
         self.menu.add_cascade(label="Point Operations", menu=point_ops_menu)
         point_ops_menu.add_command(label="Negation", command=self.negation)
+        point_ops_menu.add_command(label="Gray level reduction", command=self.gray_level_reduction)
 
         point_ops_menu.add_command(label="Multi-Add (Max 5)",
                                    command=lambda: self.setup_multi_add())
@@ -63,9 +64,9 @@ class ImageViewer:
         cv_menu.add_command(label="weighted average",
                             command=lambda: self.setup_neighbor_operation("weighted"))
         cv_menu.add_command(label="gaussian", command=lambda: self.setup_neighbor_operation("gaussowski"))
+        cv_menu.add_command(label="Sharpening", command=self.setup_linear_sharpening)
         cv_menu.add_command(label="Prewitt", command=self.setup_prewitt_detection)
         cv_menu.add_command(label="sobel", command=self.setup_sobel_detection)
-        cv_menu.add_command(label="Sharpening", command=self.setup_linear_sharpening)
         cv_menu.add_command(label="Canny", command=self.setup_canny_detection)
 
         logic_menu = tk.Menu(self.menu)
@@ -78,16 +79,17 @@ class ImageViewer:
         lab3 = tk.Menu(self.menu)
         self.menu.add_cascade(label="Lab3", menu=lab3)
         lab3.add_command(label="Histogram streeeetch", command=self.setup_custom_stretch)
-        lab3.add_command(label="2 value segmenting", command=self.setup_two_value_segment)
-        lab3.add_command(label="otsu", command=self.setup_otsu_thresholding)
-        lab3.add_command(label="adaptive threshold", command=self.setup_adaptive_threshold)
-        lab3.add_command(label="morph", command=self.setup_morphology_operation)
-        lab3.add_command(label="skeletonize", command=self.setup_skeletonization)
+
 
         if img:
             self.images.append(img.copy())
             self.current_image_index = 0
             self.display_image()
+
+    def grayscale_narrowing(self, image, low: int, high: int) -> np.ndarray:
+        arr = np.array(image)
+        narrowed = (arr * ((high - low) / 255) + low).astype('uint8')
+        return narrowed
 
     def load_image(self):
         filepath = filedialog.askopenfilename(filetypes=[("Images", "*.bmp *.tif *.png *.jpg")])
@@ -300,7 +302,7 @@ class ImageViewer:
 
             for i in range(0, 256, 50):
                 x = left_padding + i * bar_width
-                canvas.create_text(x, canvas_height - bottom_padding + 15, text=str(i), anchor=tk.N)
+                canvas.create_text(x, canvas_height - bottom_padding + 15, text=str(i), anchor="n")
 
             canvas.create_line(left_padding, top_padding, left_padding, canvas_height - bottom_padding, fill="black")
 
@@ -309,7 +311,7 @@ class ImageViewer:
             for t in range(0, max_h + 1, step):
                 y = canvas_height - bottom_padding - t * scale_y
                 canvas.create_line(left_padding - 5, y, left_padding, y, fill="black")
-                canvas.create_text(left_padding - 10, y, text=str(t), anchor=tk.E)
+                canvas.create_text(left_padding - 10, y, text=str(t), anchor="e")
 
         else:
             red_histogram = [0] * 256
@@ -374,7 +376,7 @@ class ImageViewer:
 
                 for i in range(0, 256, 50):
                     x = left_padding + i * bar_width
-                    canvas.create_text(x, 350 - bottom_padding + 15, text=str(i), anchor=tk.N)
+                    canvas.create_text(x, 350 - bottom_padding + 15, text=str(i), anchor="n")
 
                 canvas.create_line(left_padding, top_padding, left_padding,
                                    350 - bottom_padding, fill="black")
@@ -384,7 +386,7 @@ class ImageViewer:
                 for t in range(0, max_h + 1, step):
                     y = 350 - bottom_padding - t * scale_y
                     canvas.create_line(left_padding - 5, y, left_padding, y, fill="black")
-                    canvas.create_text(left_padding - 10, y, text=str(t), anchor=tk.E)
+                    canvas.create_text(left_padding - 10, y, text=str(t), anchor="e")
 
     def negation(self):
         if not self.images:
@@ -394,6 +396,48 @@ class ImageViewer:
         neg_pixels = [255 - v for v in img.getdata()]
         new_img = Image.new("L", img.size)
         new_img.putdata(neg_pixels)
+        self.images.append(new_img.convert("RGB"))
+        self.isGrayscale.append(True)
+        self.current_image_index = len(self.images) - 1
+        self.display_image()
+
+    def gray_level_reduction(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
+        levels_str = simpledialog.askstring("Levels", "2-256:")
+        if not levels_str:
+            return
+
+        try:
+            levels = int(levels_str)
+            if levels < 2 or levels > 256:
+                messagebox.showerror("Error", "2-256")
+                return
+        except ValueError:
+            messagebox.showerror("Error", "wrong value")
+            return
+
+        img = self.images[self.current_image_index].convert("L")
+        original_pixels = list(img.getdata())
+        new_pixels = []
+
+        # jak chcemy zmniejszyć liczbę szarości do 4 to 255 / 3 = 85
+        scale_factor = 255 / (levels - 1)
+
+        for pixel_value in original_pixels:
+            # obliczenie do jakiej "grupy" szarości należy pixel
+            level_index = (pixel_value * levels) // 256
+
+            # przywracam do 0-255
+            new_value = int(level_index * scale_factor)
+
+            new_pixels.append(new_value)
+
+        new_img = Image.new("L", img.size)
+        new_img.putdata(new_pixels)
+
         self.images.append(new_img.convert("RGB"))
         self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
@@ -433,10 +477,9 @@ class ImageViewer:
             "with wysycenie?"
         )
 
-        # todo: may need to uncomment this, this counts in the currently uploaded image in images_to_process
-        # if self.images:
-        #     current = self.images[self.current_image_index]
-        #     images_to_process.append(current.convert("L"))
+        if self.images:
+            current = self.images[self.current_image_index]
+            images_to_process.append(current.convert("L"))
 
         slots_left = 5 - len(images_to_process)
         if slots_left <= 0:
@@ -486,6 +529,7 @@ class ImageViewer:
 
         pixel_data_list = [list(img.getdata()) for img in images]
         result_pixels = []
+        normalized_array_original_image = None
 
         if wysycenie:
             for i in range(num_pixels):
@@ -496,19 +540,19 @@ class ImageViewer:
                 val = min(255, pixel_sum)
                 result_pixels.append(val)
         else:
-            # uprzednie zawężenie poziomów szarości
-            factor = 1.0 / num_images
+            amount = len(images)
+            normalized_array_original_image = self.grayscale_narrowing(image=images[0], low=0,
+                                                                  high=(int(256 / amount)))
 
-            for i in range(num_pixels):
-                pixel_sum = 0
-                for p_list in pixel_data_list:
-                    pixel_sum += (p_list[i] * factor)
+            for user_image in images[1::]:
+                temp_img_array = self.grayscale_narrowing(
+                    image=user_image.convert("L"),
+                    low=0,
+                    high=(int(256 / amount))
+                )
+                normalized_array_original_image += temp_img_array
 
-                result_pixels.append(int(pixel_sum))
-
-        result_img = Image.new("L", (width, height))
-        result_img.putdata(result_pixels)
-
+        result_img = Image.fromarray(normalized_array_original_image, mode="L")
         self.images.append(result_img.convert("RGB"))
         self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
@@ -516,39 +560,6 @@ class ImageViewer:
 
         mode_str = "with wysycenie" if wysycenie else "without wysycenie (scaled)"
         messagebox.showinfo("Success", f"Combined {num_images} images {mode_str}.")
-
-    def combineImage(self):
-        current_img = self.images[self.current_image_index]
-        old_img = list(current_img.getdata())
-
-        filepath = filedialog.askopenfilename(filetypes=[("Images", "*.bmp *.tif *.png *.jpg")])
-        if not filepath:
-            return
-
-        new_img = list(Image.open(filepath).getdata())
-
-        if len(old_img) != len(new_img):
-            messagebox.showerror("Error", "Both images must be the same size")
-            return
-
-        result_img = []
-        for i in range(len(old_img)):
-            old_pixel = old_img[i]
-            new_pixel = new_img[i]
-
-            if isinstance(old_pixel, tuple):
-                combined_pixel = tuple(min(a + b, 255) for a, b in zip(old_pixel, new_pixel))
-            else:
-                combined_pixel = min(old_pixel + new_pixel, 255)
-
-            result_img.append(combined_pixel)
-
-        result = Image.new(current_img.mode, current_img.size)
-        result.putdata(result_img)
-        self.images.append(result)
-        self.isGrayscale.append(False)
-        self.current_image_index = len(self.images) - 1
-        self.display_image()
 
     def setup_scalar_operation(self, operation):
         if not self.images:
@@ -583,19 +594,19 @@ class ImageViewer:
 
         if not wysycenie:
             if operation == 'multiply':
-                # Normalizacja, aby max wynik był 255.
+                # Normalizacja, max == 255
                 # P * V <= 255. V_max dla 255 to 1.
                 # max_P = floor(255 / V)
-                max_P = 255 // abs(value) if abs(value) > 1 else 255
+                if abs(value) > 1:
+                    max_P = 255 // abs(value)
+                else:
+                    max_P = 255
 
-                # Tworzymy funkcję przekształcającą, która zawęża zakres pikseli.
                 # Wzór: P_new = P_old * (max_P / 255)
                 # Następnie: P_new * V, co da nam max 255.
                 scale_factor = max_P / 255.0
                 pixels = [int(p * scale_factor) for p in pixels]
 
-            # Dzielenie i Dodawanie w trybie bez wysycenia często polega na prostym obcięciu.
-            # Dzielenie przez stałą naturalnie zawęża zakres.
 
         for p in pixels:
 
@@ -719,7 +730,7 @@ class ImageViewer:
             self.current_image_index = len(self.images) - 1
             self.display_image()
 
-        tk.Button(canny_window, text="Zastosuj", command=apply_canny).pack(pady=20)
+        tk.Button(canny_window, text="Apply", command=apply_canny).pack(pady=20)
 
     def setup_neighbor_operation(self, operation_type):
         if not self.images:
@@ -743,16 +754,37 @@ class ImageViewer:
             messagebox.showerror("error", "wrong format")
             return
 
-        if operation_type == 'average':
-            self.perform_average_filter(current_img, border_value)
-        elif operation_type == 'weighted':
-            kernel = self.spawn_kernel_input_window()
-            if kernel is not None:
-                self.perform_weighted_filter(current_img, border_value, kernel)
-        else:
-            self.perform_gaussowski_filter(current_img, border_value)
+        border_window = tk.Toplevel(self.root)
+        tk.Label(border_window, text="Select border mode:").pack(pady=10)
 
-    def perform_average_filter(self, img, border_value):
+        border_modes = {
+            "Constant": "constant",
+            "After": "after",
+            "Reflect": "reflect"
+        }
+
+        selected_mode = tk.StringVar(border_window, "constant")
+
+        def apply_selection():
+            mode = selected_mode.get()
+            border_window.destroy()
+
+            if operation_type == 'average':
+                self.perform_average_filter(current_img, border_value, mode)
+            elif operation_type == 'weighted':
+                kernel = self.spawn_kernel_input_window()
+                if kernel is not None:
+                    self.perform_weighted_filter(current_img, border_value, kernel, mode)
+            else:
+                self.perform_gaussowski_filter(current_img, border_value, mode)
+
+        for label, value in border_modes.items():
+            tk.Radiobutton(border_window, text=label, variable=selected_mode, value=value).pack(anchor="w")
+
+        tk.Button(border_window, text="Apply", command=apply_selection).pack(pady=10)
+
+
+    def perform_average_filter(self, img, border_value, mode):
         if not self.images:
             return
 
@@ -767,23 +799,43 @@ class ImageViewer:
 
             kernel = kernel / kernel_sum
 
-            # I've got no idea how to pass borderValue to filter2D,
-            # therefore I will make a border myself and hope it works.
-            img_padded_np = cv2.copyMakeBorder(
-                src=img_np,
-                top=1,
-                bottom=1,
-                left=1,
-                right=1,
-                borderType=cv2.BORDER_CONSTANT,
-                value=border_value
-            )
-
-            filtered_padded_np = cv2.filter2D(
-                src=img_padded_np,
-                ddepth=-1,
-                kernel=kernel
-            )
+            if mode == "constant":
+                img_padded_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=1,
+                    bottom=1,
+                    left=1,
+                    right=1,
+                    borderType=cv2.BORDER_CONSTANT,
+                    value=border_value
+                )
+                filtered_padded_np = cv2.filter2D(
+                    src=img_padded_np,
+                    ddepth=-1,
+                    kernel=kernel
+                )
+            elif mode == "after":
+                img_padded_np = cv2.filter2D(img_np, -1, kernel)
+                img_padded_np[0, :] = 1
+                img_padded_np[-1, :] = 1
+                img_padded_np[:, 0] = 1
+                img_padded_np[:, -1] = 1
+                filtered_padded_np = img_padded_np
+            else:
+                img_padded_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=1,
+                    bottom=1,
+                    left=1,
+                    right=1,
+                    borderType=cv2.BORDER_REFLECT,
+                    value=border_value
+                )
+                filtered_padded_np = cv2.filter2D(
+                    src=img_padded_np,
+                    ddepth=-1,
+                    kernel=kernel
+                )
 
             new_img = Image.fromarray(filtered_padded_np.astype(np.uint8))
 
@@ -828,7 +880,6 @@ class ImageViewer:
                 kernel=normalized_kernel
             )
 
-            # 4. Convert back and save
             new_img = Image.fromarray(filtered_padded_np.astype(np.uint8))
 
             self.images.append(new_img.convert("RGB"))
@@ -846,9 +897,6 @@ class ImageViewer:
         try:
             img_np = np.array(img)
 
-            # --- Kernel Normalization ---
-            # The user's kernel must be normalized so the overall image brightness
-            # doesn't change drastically (i.e., the sum of kernel elements should be 1).
             kernel_sum = np.sum(kernel)
 
             normalized_kernel = kernel / kernel_sum
@@ -863,11 +911,10 @@ class ImageViewer:
                 value=border_value
             )
 
-            # 3. Apply the 2D Filter (Convolution)
             filtered_padded_np = cv2.filter2D(
                 src=img_padded_np,
-                ddepth=-1,  # Output image depth is the same as the input
-                kernel=normalized_kernel  # Use the normalized, user-defined kernel
+                ddepth=-1,
+                kernel=normalized_kernel
             )
 
             # 4. Convert back and save
@@ -903,7 +950,7 @@ class ImageViewer:
                 kernel_window.destroy()
 
             except ValueError:
-                messagebox.showerror("Błąd Wprowadzania", "Wszystkie pola muszą zawierać prawidłowe liczby.")
+                messagebox.showerror("Error", "")
 
         ok_button = tk.Button(kernel_window, text="OK", command=on_ok)
         ok_button.grid(row=3, column=0, columnspan=3, pady=10)
@@ -959,7 +1006,6 @@ class ImageViewer:
             messagebox.showerror("Error", "Whole number")
             return
 
-        # 2. Wybór kierunku
         self.prewitt_select_direction(current_img_L, border_value)
 
     def prewitt_select_direction(self, img, border_value):
@@ -1137,20 +1183,10 @@ class ImageViewer:
             messagebox.showwarning("No Image", "No image to process")
             return
 
+        # Work in grayscale
         current_img = self.images[self.current_image_index].convert("L")
 
-        border_value_str = simpledialog.askstring("Border Value", "Enter border value (0-255):")
-        if not border_value_str:
-            return
-
-        try:
-            border_value = int(border_value_str)
-            if not (0 <= border_value <= 255):
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Error", "Invalid border value")
-            return
-
+        # Choose Laplacian mask
         direction_window = tk.Toplevel(self.root)
 
         laplasj = {
@@ -1158,38 +1194,33 @@ class ImageViewer:
             "2": [[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]],
             "3": [[-1, 2, -1], [2, -4, 2], [-1, 2, -1]],
         }
-
         selected_direction = tk.StringVar(direction_window, "1")
 
         def apply_selection():
             key = selected_direction.get()
-            mask = laplasj[key]
+            kernel = np.array(laplasj[key], dtype=np.float32)
 
             direction_window.destroy()
 
             try:
-                img_np = np.array(current_img)
-                kernel = np.array(mask, dtype=np.float32)
+                # Convert to float for processing
+                img_np = np.array(current_img, dtype=np.float32)
 
-                img_padded_np = cv2.copyMakeBorder(
+                # Apply Laplacian filter
+                lap = cv2.filter2D(
                     src=img_np,
-                    top=1,
-                    bottom=1,
-                    left=1,
-                    right=1,
-                    borderType=cv2.BORDER_CONSTANT,
-                    value=border_value
+                    ddepth=cv2.CV_32F,
+                    kernel=kernel,
+                    borderType=cv2.BORDER_REPLICATE
                 )
 
-                filtered_padded_np = cv2.filter2D(
-                    src=img_padded_np,
-                    ddepth=-1,
-                    kernel=kernel
-                )
+                # Sharpen by subtracting Laplacian (no alpha scaling)
+                sharpened = img_np - lap
+                sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
 
-                new_img = Image.fromarray(filtered_padded_np.astype(np.uint8))
+                new_img = Image.fromarray(sharpened, mode="L")
 
-                self.images.append(new_img.convert("RGB"))
+                self.images.append(new_img)
                 self.isGrayscale.append(True)
                 self.current_image_index = len(self.images) - 1
                 self.display_image()
@@ -1198,36 +1229,42 @@ class ImageViewer:
                 messagebox.showerror("Error", f"{e}")
 
         for key, value_list in laplasj.items():
-            tk.Radiobutton(direction_window, text=f"Mask {key}: {value_list}", variable=selected_direction,
-                           value=key).pack(anchor="w")
+            mask_str = "\n".join(" ".join(str(v) for v in row) for row in value_list)
+            tk.Radiobutton(
+                direction_window,
+                text=f"Mask {key}:\n{mask_str}",
+                variable=selected_direction,
+                value=key
+            ).pack(anchor="w")
 
         tk.Button(direction_window, text="Set", command=apply_selection).pack(pady=10)
 
     def setup_logic(self, needs_second_image=True):
         if not self.images:
             messagebox.showwarning("No Image", "Load the first image first.")
-            return None, None, False
+            return None, None, None, False
 
         img1 = self.images[self.current_image_index].convert("L")
         img1_np = np.array(img1)
 
         img2_np = None
-
         if needs_second_image:
-            filepath = filedialog.askopenfilename(title="Select second image",
-                                                  filetypes=[("Images", "*.bmp *.tif *.png *.jpg")])
+            filepath = filedialog.askopenfilename(
+                title="Select second image",
+                filetypes=[("Images", "*.bmp *.tif *.png *.jpg")]
+            )
             if not filepath:
-                return None, None, False
+                return None, None, None, False
 
             try:
                 img2 = Image.open(filepath).convert("L")
                 if img1.size != img2.size:
                     messagebox.showerror("Size Error", "Images must have the same dimensions.")
-                    return None, None, False
+                    return None, None, None, False
                 img2_np = np.array(img2)
             except Exception as e:
                 messagebox.showerror("Error", f"Could not load second image: {e}")
-                return None, None, False
+                return None, None, None, False
 
         binarize = messagebox.askyesno("Mode", "Convert to Binary?")
 
@@ -1235,58 +1272,84 @@ class ImageViewer:
             _, img1_np = cv2.threshold(img1_np, 127, 255, cv2.THRESH_BINARY)
             if img2_np is not None:
                 _, img2_np = cv2.threshold(img2_np, 127, 255, cv2.THRESH_BINARY)
+        else:
+            img1_np = img1_np.astype(np.uint8, copy=False)
+            if img2_np is not None:
+                img2_np = img2_np.astype(np.uint8, copy=False)
 
-        return img1_np, img2_np, True
+        return img1_np, img2_np, binarize, True
 
     def perform_not(self):
-        img1_np, _, success = self.setup_logic(needs_second_image=False)
+        img1_np, _, binarize, success = self.setup_logic(needs_second_image=False)
         if not success:
             return
 
-        result_np = cv2.bitwise_not(img1_np)
+        if binarize:
+            result_np = cv2.bitwise_not(img1_np)
+        else:
+            result_np = cv2.bitwise_not(img1_np)
 
-        new_img = Image.fromarray(result_np)
-        self.images.append(new_img.convert("RGB"))
+        new_img = Image.fromarray(result_np, mode="L")
+        self.images.append(new_img)
         self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
         self.display_image()
 
     def perform_and(self):
-        img1_np, img2_np, success = self.setup_logic(needs_second_image=True)
+        img1_np, img2_np, binarize, success = self.setup_logic(needs_second_image=True)
         if not success:
             return
 
-        result_np = cv2.bitwise_and(img1_np, img2_np)
+        if binarize:
+            result_np = cv2.bitwise_and(img1_np, img2_np)
+        else:
+            result_np = np.minimum(img1_np, img2_np).astype(np.uint8)
 
-        new_img = Image.fromarray(result_np)
-        self.images.append(new_img.convert("RGB"))
+        new_img = Image.fromarray(result_np, mode="L")
+        self.images.append(new_img)
         self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
         self.display_image()
 
     def perform_or(self):
-        img1_np, img2_np, success = self.setup_logic(needs_second_image=True)
+        img1_np, img2_np, binarize, success = self.setup_logic(needs_second_image=True)
         if not success:
             return
 
-        result_np = cv2.bitwise_or(img1_np, img2_np)
+        if binarize:
+            result_np = cv2.bitwise_or(img1_np, img2_np)
+            new_img = Image.fromarray(result_np, mode="L")
+            self.images.append(new_img)
+            self.isGrayscale.append(True)
+        else:
+            img1_np = img1_np.astype(np.uint8, copy=False)
+            img2_np = img2_np.astype(np.uint8, copy=False)
+            result_np = np.maximum(img1_np, img2_np)
+            new_img = Image.fromarray(result_np, mode="L")
+            self.images.append(new_img)
+            self.isGrayscale.append(True)
 
-        new_img = Image.fromarray(result_np)
-        self.images.append(new_img.convert("RGB"))
-        self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
         self.display_image()
 
     def perform_xor(self):
-        img1_np, img2_np, success = self.setup_logic(needs_second_image=True)
+        img1_np, img2_np, binarize, success = self.setup_logic(needs_second_image=True)
         if not success:
             return
 
-        result_np = cv2.bitwise_xor(img1_np, img2_np)
+        if binarize:
+            result_np = cv2.bitwise_xor(img1_np, img2_np)
+            new_img = Image.fromarray(result_np, mode="L")
+            self.images.append(new_img)
+            self.isGrayscale.append(True)
+        else:
+            img1_np = img1_np.astype(np.uint8, copy=False)
+            img2_np = img2_np.astype(np.uint8, copy=False)
+            result_np = cv2.absdiff(img1_np, img2_np)
+            new_img = Image.fromarray(result_np, mode="L")
+            self.images.append(new_img)
+            self.isGrayscale.append(True)
 
-        new_img = Image.fromarray(result_np)
-        self.images.append(new_img.convert("RGB"))
-        self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
         self.display_image()
 
@@ -1341,8 +1404,8 @@ class ImageViewer:
             img = self.images[self.current_image_index].convert("L")
             pixels = list(img.getdata())
 
-            # Zgodnie z tym co Pani profesor wspominała na lab1 (lub lab2) lookup table są szybsze :)
             # https://www.algorytm.org/przetwarzanie-obrazow/histogram-rozciaganie/rozciaganie-cs.html
+            # jak na wykładzie, lookup table jest szybsze
             lut = []
             scale_factor = (q4 - q3) / (p2 - p1)
             for val in range(256):

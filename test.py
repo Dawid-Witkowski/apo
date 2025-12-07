@@ -783,7 +783,6 @@ class ImageViewer:
 
         tk.Button(border_window, text="Apply", command=apply_selection).pack(pady=10)
 
-
     def perform_average_filter(self, img, border_value, mode):
         if not self.images:
             return
@@ -847,7 +846,7 @@ class ImageViewer:
         except Exception as e:
             messagebox.showerror("error", f"{e}")
 
-    def perform_gaussowski_filter(self, img, border_value):
+    def perform_gaussowski_filter(self, img, border_value, mode):
         if not self.images:
             return
 
@@ -864,21 +863,52 @@ class ImageViewer:
 
             normalized_kernel = kernel / kernel_sum
 
-            img_padded_np = cv2.copyMakeBorder(
-                src=img_np,
-                top=1,
-                bottom=1,
-                left=1,
-                right=1,
-                borderType=cv2.BORDER_CONSTANT,
-                value=border_value
-            )
+            padding_size = 1
 
-            filtered_padded_np = cv2.filter2D(
-                src=img_padded_np,
-                ddepth=-1,
-                kernel=normalized_kernel
-            )
+            if mode == "constant":
+                img_padded_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=padding_size,
+                    bottom=padding_size,
+                    left=padding_size,
+                    right=padding_size,
+                    borderType=cv2.BORDER_CONSTANT,
+                    value=border_value
+                )
+                filtered_padded_np = cv2.filter2D(
+                    src=img_padded_np,
+                    ddepth=-1,
+                    kernel=normalized_kernel
+                )
+
+            elif mode == "after":
+                filtered_padded_np = cv2.filter2D(
+                    src=img_np,
+                    ddepth=-1,
+                    kernel=normalized_kernel,
+                    borderType=cv2.BORDER_REPLICATE
+                )
+
+                filtered_padded_np[0, :] = border_value
+                filtered_padded_np[-1, :] = border_value
+                filtered_padded_np[:, 0] = border_value
+                filtered_padded_np[:, -1] = border_value
+
+            else:
+                img_padded_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=padding_size,
+                    bottom=padding_size,
+                    left=padding_size,
+                    right=padding_size,
+                    borderType=cv2.BORDER_REFLECT,
+                    value=border_value
+                )
+                filtered_padded_np = cv2.filter2D(
+                    src=img_padded_np,
+                    ddepth=-1,
+                    kernel=normalized_kernel
+                )
 
             new_img = Image.fromarray(filtered_padded_np.astype(np.uint8))
 
@@ -890,7 +920,7 @@ class ImageViewer:
         except Exception as e:
             messagebox.showerror("error", f"{e}")
 
-    def perform_weighted_filter(self, img, border_value, kernel):
+    def perform_weighted_filter(self, img, border_value, kernel, mode):
         if not self.images:
             return
 
@@ -898,26 +928,56 @@ class ImageViewer:
             img_np = np.array(img)
 
             kernel_sum = np.sum(kernel)
+            if kernel_sum == 0:
+                kernel_sum = 1
 
-            normalized_kernel = kernel / kernel_sum
+            normalized_kernel = kernel.astype(np.float32) / kernel_sum
 
-            img_padded_np = cv2.copyMakeBorder(
-                src=img_np,
-                top=1,
-                bottom=1,
-                left=1,
-                right=1,
-                borderType=cv2.BORDER_CONSTANT,
-                value=border_value
-            )
+            if mode == "constant":
+                img_padded_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=1,
+                    bottom=1,
+                    left=1,
+                    right=1,
+                    borderType=cv2.BORDER_CONSTANT,
+                    value=border_value
+                )
+                filtered_padded_np = cv2.filter2D(
+                    src=img_padded_np,
+                    ddepth=-1,
+                    kernel=normalized_kernel
+                )
 
-            filtered_padded_np = cv2.filter2D(
-                src=img_padded_np,
-                ddepth=-1,
-                kernel=normalized_kernel
-            )
+            elif mode == "after":
+                filtered_padded_np = cv2.filter2D(
+                    src=img_np,
+                    ddepth=-1,
+                    kernel=normalized_kernel,
+                    borderType=cv2.BORDER_REPLICATE
+                )
 
-            # 4. Convert back and save
+                filtered_padded_np[0, :] = border_value
+                filtered_padded_np[-1, :] = border_value
+                filtered_padded_np[:, 0] = border_value
+                filtered_padded_np[:, -1] = border_value
+
+            else:
+                img_padded_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=1,
+                    bottom=1,
+                    left=1,
+                    right=1,
+                    borderType=cv2.BORDER_REFLECT,
+                    value=border_value
+                )
+                filtered_padded_np = cv2.filter2D(
+                    src=img_padded_np,
+                    ddepth=-1,
+                    kernel=normalized_kernel
+                )
+
             new_img = Image.fromarray(filtered_padded_np.astype(np.uint8))
 
             self.images.append(new_img.convert("RGB"))
@@ -993,22 +1053,52 @@ class ImageViewer:
         current_img = self.images[self.current_image_index]
         current_img_L = current_img.convert("L")
 
-        border_value_str = simpledialog.askstring("BORDER_CONSTANT:", "BORDER_CONSTANT 0-255:", parent=self.root)
-        if not border_value_str:
-            return
+        dialog_window = tk.Toplevel(self.root)
+        selected_mode = tk.StringVar(dialog_window, "constant")
+        border_value_var = tk.StringVar(dialog_window, "0")
 
-        try:
-            border_value = int(border_value_str)
-            if not (0 <= border_value <= 255):
-                messagebox.showerror("Error", "0-255.")
+        def apply_settings():
+            mode = selected_mode.get()
+            border_value_str = border_value_var.get()
+
+            try:
+                border_value = int(border_value_str)
+                if not (0 <= border_value <= 255):
+                    messagebox.showerror("Error", "Border value must be between 0 and 255.", parent=dialog_window)
+                    return
+            except ValueError:
+                messagebox.showerror("Error", "Border value must be a whole number.", parent=dialog_window)
                 return
-        except ValueError:
-            messagebox.showerror("Error", "Whole number")
-            return
 
-        self.prewitt_select_direction(current_img_L, border_value)
+            dialog_window.destroy()
+            self.prewitt_select_direction(current_img_L, border_value, mode)
 
-    def prewitt_select_direction(self, img, border_value):
+        border_frame = tk.Frame(dialog_window, padx=10, pady=10)
+        border_frame.pack(fill='x')
+
+        tk.Label(border_frame, text="BORDER_CONSTANT 0-255:").pack(side=tk.LEFT)
+        tk.Entry(border_frame, textvariable=border_value_var, width=5).pack(side=tk.LEFT, padx=5)
+
+        mode_frame = tk.LabelFrame(dialog_window, text="Select Border Mode", padx=10, pady=10)
+        mode_frame.pack(padx=10, pady=5, fill='x')
+
+        modes = {
+            "Constant": "constant",
+            "Reflect": "reflect",
+            "After": "after"
+        }
+
+        for label, value in modes.items():
+            tk.Radiobutton(
+                mode_frame,
+                text=label,
+                variable=selected_mode,
+                value=value
+            ).pack(anchor="w")
+
+        tk.Button(dialog_window, text="Apply & Select Direction", command=apply_settings).pack(pady=10)
+
+    def prewitt_select_direction(self, img, border_value, mode):
         direction_window = tk.Toplevel(self.root)
         tk.Label(direction_window, text="Direction::").pack(
             pady=10)
@@ -1029,14 +1119,14 @@ class ImageViewer:
         def apply_selection():
             angle = selected_direction.get()
             direction_window.destroy()
-            self.perform_prewitt_detection(img, border_value, angle)
+            self.perform_prewitt_detection(img, border_value, angle, mode)
 
         for label, value in directions.items():
             tk.Radiobutton(direction_window, text=label, variable=selected_direction, value=value).pack(anchor="w")
 
-        tk.Button(direction_window, text="Zastosuj", command=apply_selection).pack(pady=10)
+        tk.Button(direction_window, text="Set", command=apply_selection).pack(pady=10)
 
-    def perform_prewitt_detection(self, img, border_value, angle_str):
+    def perform_prewitt_detection(self, img, border_value, angle_str, mode):
         if not self.images:
             return
 
@@ -1062,42 +1152,65 @@ class ImageViewer:
             else:
                 kernel = np.array([[-1, -1, 0], [-1, 0, 1], [0, 1, 1]], dtype=np.float32)
 
-            # 3. Dodanie marginesu (Padding)
-            img_padded_np = cv2.copyMakeBorder(
-                src=img_np,
-                top=1,
-                bottom=1,
-                left=1,
-                right=1,
-                borderType=cv2.BORDER_CONSTANT,
-                value=border_value
-            )
+            padding_size = 1
 
-            # 4. Aplikacja filtra 2D (Konwolucja)
-            # Wynik może mieć wartości ujemne (oznaczają "ciemną" stronę krawędzi)
-            filtered_np = cv2.filter2D(
-                src=img_padded_np,
-                ddepth=-1,  # Zachowanie typu danych (float32)
-                kernel=kernel
-            )
+            if mode == "constant":
+                img_processed_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=padding_size,
+                    bottom=padding_size,
+                    left=padding_size,
+                    right=padding_size,
+                    borderType=cv2.BORDER_CONSTANT,
+                    value=border_value
+                )
 
-            # 5. Normalizacja wartości bezwzględnej do zakresu 0-255
-            # Ponieważ operatory kierunkowe Prewitta zwracają wartości różnic,
-            # bierzemy wartość bezwzględną, aby krawędzie były jasne niezależnie od kierunku zmiany jasności.
+                filtered_np = cv2.filter2D(
+                    src=img_processed_np,
+                    ddepth=-1,
+                    kernel=kernel
+                )
+
+            elif mode == "after":
+                filtered_np = cv2.filter2D(
+                    src=img_np,
+                    ddepth=-1,
+                    kernel=kernel,
+                    borderType=cv2.BORDER_REPLICATE
+                )
+
+                filtered_np[0, :] = border_value
+                filtered_np[-1, :] = border_value
+                filtered_np[:, 0] = border_value
+                filtered_np[:, -1] = border_value
+
+            else:
+                img_processed_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=padding_size,
+                    bottom=padding_size,
+                    left=padding_size,
+                    right=padding_size,
+                    borderType=cv2.BORDER_REFLECT,
+                    value=border_value
+                )
+
+                filtered_np = cv2.filter2D(
+                    src=img_processed_np,
+                    ddepth=-1,
+                    kernel=kernel
+                )
+
             magnitude = np.abs(filtered_np)
 
-            # Skalowanie do zakresu 0-255. Maksymalna wartość dla Prewitta to 3*255 = 765
-            # Skalowanie na podstawie wartości maksymalnej (aby wykorzystać pełny zakres jasności)
             max_val = np.max(magnitude)
             if max_val > 0:
                 normalized_magnitude = (magnitude / max_val) * 255
             else:
-                normalized_magnitude = magnitude  # Wszędzie 0
+                normalized_magnitude = magnitude
 
-            # Konwersja na typ całkowity 8-bitowy (uint8)
             result_np = normalized_magnitude.astype(np.uint8)
 
-            # 6. Konwersja z powrotem do PIL Image i wyświetlenie
             new_img = Image.fromarray(result_np)
 
             self.images.append(new_img.convert("RGB"))

@@ -44,6 +44,10 @@ class ImageViewer:
         hist_transform_menu.add_command(label="Linear stretch (5% wysycenie)",
                                         command=lambda: self.linear_stretch(True))
 
+        hist_transform_menu.add_command(label="Histogram equalization", command=self.histogram_equalization)
+        hist_transform_menu.add_command(label="binary tresh", command=self.binary_threshold)
+        hist_transform_menu.add_command(label="binary tresh gray", command=self.gray_threshold)
+
         point_ops_menu = tk.Menu(self.menu)
         self.menu.add_cascade(label="Point Operations", menu=point_ops_menu)
         point_ops_menu.add_command(label="Negation", command=self.negation)
@@ -68,6 +72,7 @@ class ImageViewer:
         cv_menu.add_command(label="Prewitt", command=self.setup_prewitt_detection)
         cv_menu.add_command(label="sobel", command=self.setup_sobel_detection)
         cv_menu.add_command(label="Canny", command=self.setup_canny_detection)
+        cv_menu.add_command(label="Median", command=self.setup_median_filter)
 
         logic_menu = tk.Menu(self.menu)
         self.menu.add_cascade(label="Logic", menu=logic_menu)
@@ -79,6 +84,11 @@ class ImageViewer:
         lab3 = tk.Menu(self.menu)
         self.menu.add_cascade(label="Lab3", menu=lab3)
         lab3.add_command(label="Histogram streeeetch", command=self.setup_custom_stretch)
+        lab3.add_command(label="2 value segmenting", command=self.setup_two_value_segment)
+        lab3.add_command(label="otsu", command=self.setup_otsu_thresholding)
+        lab3.add_command(label="adaptive threshold", command=self.setup_adaptive_threshold)
+        lab3.add_command(label="morph", command=self.setup_morphology_operation)
+        lab3.add_command(label="skeletonize", command=self.setup_skeletonization)
 
 
         if img:
@@ -469,6 +479,101 @@ class ImageViewer:
         self.current_image_index = len(self.images) - 1
         self.display_image()
 
+    def histogram_equalization(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
+        img = self.images[self.current_image_index].convert("L")
+        pixels = list(img.getdata())
+
+        hist = [0] * 256
+        for p in pixels:
+            hist[p] += 1
+
+        cdf = np.cumsum(hist)
+
+        cdf_min = cdf[cdf > 0].min()
+        total_pixels = len(pixels)
+
+        lut = np.zeros(256, dtype=np.uint8)
+        for i in range(256):
+            if cdf[i] > 0:
+                lut[i] = np.round(((cdf[i] - cdf_min) / (total_pixels - cdf_min)) * 255)
+            else:
+                lut[i] = 0
+
+        result = [int(lut[p]) for p in pixels]
+
+        new_img = Image.new("L", img.size)
+        new_img.putdata(result)
+
+        self.images.append(new_img)
+        self.isGrayscale.append(True)
+        self.current_image_index = len(self.images) - 1
+        self.display_image()
+
+    def binary_threshold(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
+        threshold_str = simpledialog.askstring("Threshold", "0-255:")
+        if not threshold_str:
+            return
+
+        try:
+            threshold = int(threshold_str)
+            if threshold < 0 or threshold > 255:
+                messagebox.showerror("Error", "0-255")
+                return
+        except ValueError:
+            messagebox.showerror("Error", "wrong values")
+            return
+
+        img = self.images[self.current_image_index].convert("L")
+        pixels = list(img.getdata())
+
+        new_pixels = [255 if v >= threshold else 0 for v in pixels]
+
+        new_img = Image.new("L", img.size)
+        new_img.putdata(new_pixels)
+        self.images.append(new_img.convert("RGB"))
+        self.isGrayscale.append(True)
+        self.current_image_index = len(self.images) - 1
+        self.display_image()
+
+    def gray_threshold(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
+        threshold_str = simpledialog.askstring("Threshold", "0-255:")
+        if not threshold_str:
+            return
+
+        try:
+            threshold = int(threshold_str)
+            if threshold < 0 or threshold > 255:
+                messagebox.showerror("Error", "0 and 255")
+                return
+        except ValueError:
+            messagebox.showerror("Error", "Invalid threshold value")
+            return
+
+        img = self.images[self.current_image_index].convert("L")
+        pixels = list(img.getdata())
+
+        # Gray-level thresholding: keep values below threshold, saturate above threshold
+        new_pixels = [v if v < threshold else 255 for v in pixels]
+
+        new_img = Image.new("L", img.size)
+        new_img.putdata(new_pixels)
+        self.images.append(new_img.convert("RGB"))
+        self.isGrayscale.append(True)
+        self.current_image_index = len(self.images) - 1
+        self.display_image()
+
     def setup_multi_add(self):
         images_to_process = []
 
@@ -477,9 +582,9 @@ class ImageViewer:
             "with wysycenie?"
         )
 
-        if self.images:
-            current = self.images[self.current_image_index]
-            images_to_process.append(current.convert("L"))
+        # if self.images:
+        #     current = self.images[self.current_image_index]
+        #     images_to_process.append(current.convert("L"))
 
         slots_left = 5 - len(images_to_process)
         if slots_left <= 0:
@@ -522,37 +627,43 @@ class ImageViewer:
         self.calculate_multi_add(images_to_process, wysycenie)
 
     # todo: check what is "wysycenie" in english XDD
-    def calculate_multi_add(self, images, wysycenie):
-        width, height = images[0].size
+    def calculate_multi_add(self, images, wysycenie=True):
         num_images = len(images)
-        num_pixels = width * height
+        if num_images < 2:
+            messagebox.showwarning("", "You need at least 2 images to combine.")
+        if num_images > 5:
+            messagebox.showwarning("at most 5 images.")
 
-        pixel_data_list = [list(img.getdata()) for img in images]
-        result_pixels = []
-        normalized_array_original_image = None
+        np_images = []
+        for img in images:
+            gray = img.convert("L")
+            arr = np.array(gray, dtype=np.uint8)
+            np_images.append(arr)
 
-        if wysycenie:
-            for i in range(num_pixels):
-                pixel_sum = 0
-                for p_list in pixel_data_list:
-                    pixel_sum += p_list[i]
-
-                val = min(255, pixel_sum)
-                result_pixels.append(val)
-        else:
-            amount = len(images)
-            normalized_array_original_image = self.grayscale_narrowing(image=images[0], low=0,
-                                                                  high=(int(256 / amount)))
-
-            for user_image in images[1::]:
-                temp_img_array = self.grayscale_narrowing(
-                    image=user_image.convert("L"),
-                    low=0,
-                    high=(int(256 / amount))
+        base_shape = np_images[0].shape
+        for i, arr in enumerate(np_images[1:], start=2):
+            if arr.shape != base_shape:
+                raise ValueError(
+                    f"Image {i} has different size: {arr.shape[1]}x{arr.shape[0]} "
+                    f"(expected: {base_shape[1]}x{base_shape[0]})"
                 )
-                normalized_array_original_image += temp_img_array
 
-        result_img = Image.fromarray(normalized_array_original_image, mode="L")
+        result = np.zeros_like(np_images[0], dtype=np.float32)
+        if wysycenie:
+            for arr in np_images:
+                result += arr.astype(np.float32)
+        else:
+            max_scale_value = 255 // num_images
+            scaled_images = []
+            for arr in np_images:
+                scaled = cv2.normalize(arr, None, 0, max_scale_value, cv2.NORM_MINMAX)
+                scaled_images.append(scaled)
+            for arr in scaled_images:
+                result += arr.astype(np.float32)
+
+        result = np.clip(result, 0, 255).astype(np.uint8)
+        result_img = Image.fromarray(result, mode="L")
+
         self.images.append(result_img.convert("RGB"))
         self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1
@@ -1064,10 +1175,10 @@ class ImageViewer:
             try:
                 border_value = int(border_value_str)
                 if not (0 <= border_value <= 255):
-                    messagebox.showerror("Error", "Border value must be between 0 and 255.", parent=dialog_window)
+                    messagebox.showerror("Error", "0-255.", parent=dialog_window)
                     return
             except ValueError:
-                messagebox.showerror("Error", "Border value must be a whole number.", parent=dialog_window)
+                messagebox.showerror("Error", "whole number.", parent=dialog_window)
                 return
 
             dialog_window.destroy()
@@ -1079,7 +1190,7 @@ class ImageViewer:
         tk.Label(border_frame, text="BORDER_CONSTANT 0-255:").pack(side=tk.LEFT)
         tk.Entry(border_frame, textvariable=border_value_var, width=5).pack(side=tk.LEFT, padx=5)
 
-        mode_frame = tk.LabelFrame(dialog_window, text="Select Border Mode", padx=10, pady=10)
+        mode_frame = tk.LabelFrame(dialog_window, text="Mode", padx=10, pady=10)
         mode_frame.pack(padx=10, pady=5, fill='x')
 
         modes = {
@@ -1096,7 +1207,7 @@ class ImageViewer:
                 value=value
             ).pack(anchor="w")
 
-        tk.Button(dialog_window, text="Apply & Select Direction", command=apply_settings).pack(pady=10)
+        tk.Button(dialog_window, text="Set", command=apply_settings).pack(pady=10)
 
     def prewitt_select_direction(self, img, border_value, mode):
         direction_window = tk.Toplevel(self.root)
@@ -1291,15 +1402,14 @@ class ImageViewer:
         except Exception as e:
             messagebox.showerror("Error", f"{e}")
 
+
     def setup_linear_sharpening(self):
         if not self.images:
             messagebox.showwarning("No Image", "No image to process")
             return
 
-        # Work in grayscale
         current_img = self.images[self.current_image_index].convert("L")
 
-        # Choose Laplacian mask
         direction_window = tk.Toplevel(self.root)
 
         laplasj = {
@@ -1351,6 +1461,103 @@ class ImageViewer:
             ).pack(anchor="w")
 
         tk.Button(direction_window, text="Set", command=apply_selection).pack(pady=10)
+
+    def setup_median_filter(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
+        current_img = self.images[self.current_image_index]
+        current_img_L = current_img.convert("L")
+
+        dialog_window = tk.Toplevel(self.root)
+        selected_mode = tk.StringVar(dialog_window, "constant")
+        border_value_var = tk.StringVar(dialog_window, "0")
+        kernel_size_var = tk.IntVar(dialog_window, 3)
+
+        def apply_settings():
+            mode = selected_mode.get()
+            border_value_str = border_value_var.get()
+            kernel_size = kernel_size_var.get()
+
+            try:
+                border_value = int(border_value_str)
+                if not (0 <= border_value <= 255):
+                    messagebox.showerror("Error", "0-255.", parent=dialog_window)
+                    return
+            except ValueError:
+                messagebox.showerror("Error", "whole number", parent=dialog_window)
+                return
+
+            dialog_window.destroy()
+            self.perform_median_filter(current_img_L, border_value, mode, kernel_size)
+
+        border_frame = tk.Frame(dialog_window, padx=10, pady=10)
+        border_frame.pack(fill='x')
+        tk.Label(border_frame, text="BORDER_CONSTANT 0-255:").pack(side=tk.LEFT)
+        tk.Entry(border_frame, textvariable=border_value_var, width=5).pack(side=tk.LEFT, padx=5)
+
+        mode_frame = tk.LabelFrame(dialog_window, text="Mode", padx=10, pady=10)
+        mode_frame.pack(padx=10, pady=5, fill='x')
+        modes = {"Constant": "constant", "Reflect": "reflect", "After": "after"}
+        for label, value in modes.items():
+            tk.Radiobutton(mode_frame, text=label, variable=selected_mode, value=value).pack(anchor="w")
+
+        kernel_frame = tk.LabelFrame(dialog_window, text="Kernel", padx=10, pady=10)
+        kernel_frame.pack(padx=10, pady=5, fill='x')
+
+        # suwak :D
+        tk.Scale(kernel_frame, from_=3, to=9, resolution=2, orient=tk.HORIZONTAL,
+                 variable=kernel_size_var, label="").pack(fill='x')
+
+        tk.Button(dialog_window, text="Set", command=apply_settings).pack(pady=10)
+
+    def perform_median_filter(self, img, border_value, mode, kernel_size):
+        if not self.images:
+            return
+
+        try:
+            img_np = np.array(img, dtype=np.uint8)
+
+            if mode == "constant":
+                img_processed_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=kernel_size // 2,
+                    bottom=kernel_size // 2,
+                    left=kernel_size // 2,
+                    right=kernel_size // 2,
+                    borderType=cv2.BORDER_CONSTANT,
+                    value=border_value
+                )
+                filtered_np = cv2.medianBlur(img_processed_np, kernel_size)
+
+            elif mode == "after":
+                filtered_np = cv2.medianBlur(img_np, kernel_size)
+                filtered_np[0, :] = border_value
+                filtered_np[-1, :] = border_value
+                filtered_np[:, 0] = border_value
+                filtered_np[:, -1] = border_value
+
+            else:
+                img_processed_np = cv2.copyMakeBorder(
+                    src=img_np,
+                    top=kernel_size // 2,
+                    bottom=kernel_size // 2,
+                    left=kernel_size // 2,
+                    right=kernel_size // 2,
+                    borderType=cv2.BORDER_REFLECT,
+                    value=border_value
+                )
+                filtered_np = cv2.medianBlur(img_processed_np, kernel_size)
+
+            new_img = Image.fromarray(filtered_np)
+            self.images.append(new_img.convert("RGB"))
+            self.isGrayscale.append(True)
+            self.current_image_index = len(self.images) - 1
+            self.display_image()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"{e}")
 
     def setup_logic(self, needs_second_image=True):
         if not self.images:
@@ -1607,22 +1814,21 @@ class ImageViewer:
             return
 
         current_img = self.images[self.current_image_index]
-        current_img_L = current_img.convert("L")
 
-        self.perform_otsu_thresholding(current_img_L)
+        self.perform_otsu_thresholding(current_img.convert("L"))
 
     def perform_otsu_thresholding(self, img):
         try:
             img_np = np.array(img)
 
             ret, thresh_img = cv2.threshold(img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
             new_img = Image.fromarray(thresh_img)
 
             self.images.append(new_img.convert("RGB"))
             self.isGrayscale.append(True)
             self.current_image_index = len(self.images) - 1
             self.display_image()
+            messagebox.showinfo("ret value", f"{ret}")
 
         except Exception as e:
             messagebox.showerror("Error", f"{e}")
@@ -1637,8 +1843,8 @@ class ImageViewer:
         method_var = tk.StringVar(value="mean")
 
         tk.Label(window, text="Method:").pack(pady=(10, 5))
-        tk.Radiobutton(window, text="Mean", variable=method_var, value="mean")
-        tk.Radiobutton(window, text="Gaussian", variable=method_var, value="gaussian")
+        tk.Radiobutton(window, text="Mean", variable=method_var, value="mean").pack(pady=(10, 5))
+        tk.Radiobutton(window, text="Gaussian", variable=method_var, value="gaussian").pack(pady=(10, 5))
 
         tk.Frame(window, height=2, bd=1, relief="sunken").pack(fill="x", padx=5, pady=10)
 
@@ -1712,10 +1918,10 @@ class ImageViewer:
         lbl_op.pack(pady=(10, 5))
 
         ops = [
-            ("Erozja", "erosion"),
-            ("Dylacja", "dilation"),
-            ("Otwarcie", "opening"),
-            ("Zamknięcie", "closing")
+            ("erosion", "erosion"),
+            ("dilation", "dilation"),
+            ("opening", "opening"),
+            ("closing", "closing")
         ]
 
         for text, value in ops:
@@ -1724,8 +1930,8 @@ class ImageViewer:
         tk.Frame(morph_window, height=2, bd=1, relief="sunken").pack(fill="x", padx=5, pady=10)
 
         shapes = [
-            ("Rectangle", "rect"),
-            ("Diamond", "cross")
+            ("rectangle", "rect"),
+            ("cross", "cross")
         ]
 
         for text, value in shapes:
@@ -1750,11 +1956,7 @@ class ImageViewer:
 
             if shape_type == 'rect':
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-
             else:
-                # [[0, 1, 0],
-                #  [1, 1, 1],
-                #  [0, 1, 0]]
                 kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
 
             result_np = None
@@ -1785,24 +1987,51 @@ class ImageViewer:
             messagebox.showwarning("Error", "No image")
             return
 
-        current_img = self.images[self.current_image_index]
-        current_img_L = current_img.convert("L")
-        self.perform_skeletonization(current_img_L)
+        skel_window = tk.Toplevel(self.root)
+        skel_window.geometry("300x250")
 
-    def perform_skeletonization(self, img):
+        shape_var = tk.StringVar(value="rect")
+
+        lbl_shape = tk.Label(skel_window, text="Structuring element shape:")
+        lbl_shape.pack(pady=(10, 5))
+
+        shapes = [
+            ("rectangle", "rect"),
+            ("cross", "cross")
+        ]
+
+        for text, value in shapes:
+            tk.Radiobutton(skel_window, text=text, variable=shape_var, value=value).pack(anchor="w", padx=20)
+
+        def apply_skeletonization():
+            shape = shape_var.get()
+            skel_window.destroy()
+
+            current_img = self.images[self.current_image_index]
+            current_img_L = current_img.convert("L")
+            self.perform_skeletonization(current_img_L, shape)
+
+        tk.Button(skel_window, text="Set", command=apply_skeletonization, height=2, width=15).pack(pady=20)
+
+    def perform_skeletonization(self, img, shape_type="cross"):
         try:
             img_np = np.array(img)
             _, binary_img = cv2.threshold(img_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
             size = np.size(binary_img)
             skel = np.zeros(binary_img.shape, np.uint8)
-            element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+
+            if shape_type == 'rect':
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            else:
+                kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+
             img = binary_img.copy()
             done = False
 
             while not done:
-                eroded = cv2.erode(img, element)
-                temp = cv2.dilate(eroded, element)
+                eroded = cv2.erode(img, kernel)
+                temp = cv2.dilate(eroded, kernel)
                 temp = cv2.subtract(img, temp)
                 skel = cv2.bitwise_or(skel, temp)
                 img = eroded.copy()

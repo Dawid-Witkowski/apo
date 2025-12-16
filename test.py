@@ -555,20 +555,17 @@ class ImageViewer:
         try:
             threshold = int(threshold_str)
             if threshold < 0 or threshold > 255:
-                messagebox.showerror("Error", "0 and 255")
+                messagebox.showerror("Error", "0-255")
                 return
         except ValueError:
             messagebox.showerror("Error", "Invalid threshold value")
             return
 
         img = self.images[self.current_image_index].convert("L")
-        pixels = list(img.getdata())
+        img_array = np.array(img)
+        new_array = np.where(img_array >= threshold, img_array, 0).astype(np.uint8)
+        new_img = Image.fromarray(new_array, mode="L")
 
-        # Gray-level thresholding: keep values below threshold, saturate above threshold
-        new_pixels = [v if v < threshold else 255 for v in pixels]
-
-        new_img = Image.new("L", img.size)
-        new_img.putdata(new_pixels)
         self.images.append(new_img.convert("RGB"))
         self.isGrayscale.append(True)
         self.current_image_index = len(self.images) - 1

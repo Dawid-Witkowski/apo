@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image, ImageTk
 import statistics
 import cv2
-from typing import Any
+import xlsxwriter
 
 
 class ImageViewer:
@@ -90,11 +90,16 @@ class ImageViewer:
         lab3.add_command(label="morph", command=self.setup_morphology_operation)
         lab3.add_command(label="skeletonize", command=self.setup_skeletonization)
 
+        lab4 = tk.Menu(self.menu)
+        self.menu.add_cascade(label="lab4", menu=lab4)
+        lab4.add_command(label="moments", command=self.calculate_moments)
+        lab4.add_command(label="Hought", command=self.hough_edge_detection)
 
         if img:
             self.images.append(img.copy())
             self.current_image_index = 0
             self.display_image()
+
 
     def grayscale_narrowing(self, image, low: int, high: int) -> np.ndarray:
         arr = np.array(image)
@@ -1399,7 +1404,6 @@ class ImageViewer:
         except Exception as e:
             messagebox.showerror("Error", f"{e}")
 
-
     def setup_linear_sharpening(self):
         if not self.images:
             messagebox.showwarning("No Image", "No image to process")
@@ -1805,16 +1809,16 @@ class ImageViewer:
 
         tk.Button(seg_window, text="Set", command=apply_segmentation).pack(pady=20)
 
-    def setup_otsu_thresholding(self):
+    def setup_otsu_thresholding(self, display_ret=True):
         if not self.images:
             messagebox.showwarning("No Image", "No image to process")
             return
 
         current_img = self.images[self.current_image_index]
 
-        self.perform_otsu_thresholding(current_img.convert("L"))
+        self.perform_otsu_thresholding(current_img.convert("L"), display_ret)
 
-    def perform_otsu_thresholding(self, img):
+    def perform_otsu_thresholding(self, img, display_ret):
         try:
             img_np = np.array(img)
 
@@ -1825,7 +1829,8 @@ class ImageViewer:
             self.isGrayscale.append(True)
             self.current_image_index = len(self.images) - 1
             self.display_image()
-            messagebox.showinfo("ret value", f"{ret}")
+            if display_ret:
+                messagebox.showinfo("ret value", f"{ret}")
 
         except Exception as e:
             messagebox.showerror("Error", f"{e}")
@@ -2040,6 +2045,112 @@ class ImageViewer:
             new_img = Image.fromarray(skel)
             self.images.append(new_img.convert("RGB"))
             self.isGrayscale.append(True)
+            self.current_image_index = len(self.images) - 1
+            self.display_image()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"{e}")
+
+    def calculate_moments(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
+        # hide the checkbox
+        self.setup_otsu_thresholding(display_ret=False)
+
+        img = self.images[self.current_image_index].convert("L")
+        arr = np.array(img, dtype=np.uint8)
+
+        _, binary = cv2.threshold(arr, 1, 255, cv2.THRESH_BINARY)
+
+        contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            messagebox.showwarning("No Contours", "No contours found in image")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            title="Save contour moments",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")]
+        )
+        if not filepath:
+            return
+
+        workbook = xlsxwriter.Workbook(filepath)
+
+        try:
+            sheet = workbook.add_worksheet("Moments")
+
+            moment_keys = list(cv2.moments(contours[0]).keys())
+
+            sheet.write(0, 0, "ID")
+            for col, key in enumerate(moment_keys, start=1):
+                sheet.write(0, col, key)
+            base_col = len(moment_keys) + 1
+            sheet.write(0, base_col, "Area")
+            sheet.write(0, base_col + 1, "Perimeter")
+            sheet.write(0, base_col + 2, "AspectRatio")
+            sheet.write(0, base_col + 3, "Extent")
+            sheet.write(0, base_col + 4, "Solidity")
+            sheet.write(0, base_col + 5, "EquivalentDiameter")
+
+            # Rows
+            for idx, contour in enumerate(contours, start=1):
+                moments = cv2.moments(contour)
+                area = cv2.contourArea(contour)
+                perimeter = cv2.arcLength(contour, True)
+
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = w / h if h != 0 else 0
+
+                rect_area = w * h
+                extent = area / rect_area if rect_area != 0 else 0
+
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                solidity = area / hull_area if hull_area != 0 else 0
+
+                equivalent_diameter = np.sqrt(4 * area / np.pi) if area > 0 else 0
+
+                sheet.write(idx, 0, f"id_{idx}")
+                for col, key in enumerate(moment_keys, start=1):
+                    sheet.write(idx, col, f"{moments[key]:.25f}")
+                sheet.write(idx, base_col, f"{area:.2f}")
+                sheet.write(idx, base_col + 1, f"{perimeter:.2f}")
+                sheet.write(idx, base_col + 2, f"{aspect_ratio:.4f}")
+                sheet.write(idx, base_col + 3, f"{extent:.4f}")
+                sheet.write(idx, base_col + 4, f"{solidity:.4f}")
+                sheet.write(idx, base_col + 5, f"{equivalent_diameter:.4f}")
+
+        finally:
+            workbook.close()
+
+        messagebox.showinfo("Success", f"Shapes saved to {filepath}")
+
+    def hough_edge_detection(self, canny_threshold1=50, canny_threshold2=150, hough_threshold=100):
+        if not self.images:
+            return
+
+        try:
+            img = self.images[self.current_image_index]
+            img_gray = np.array(img.convert("L"), dtype=np.uint8)
+
+            edges = cv2.Canny(img_gray, canny_threshold1, canny_threshold2, apertureSize=3)
+
+            lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180,
+                                    threshold=hough_threshold,
+                                    minLineLength=30, maxLineGap=10)
+
+            img_color = np.array(img.convert("RGB"))
+            if lines is not None:
+                for line in lines:
+                    x1, y1, x2, y2 = line[0]
+                    cv2.line(img_color, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+            new_img = Image.fromarray(img_color)
+            self.images.append(new_img)
+            self.isGrayscale.append(False)
             self.current_image_index = len(self.images) - 1
             self.display_image()
 

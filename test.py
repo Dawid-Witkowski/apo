@@ -45,8 +45,8 @@ class ImageViewer:
                                         command=lambda: self.linear_stretch(True))
 
         hist_transform_menu.add_command(label="Histogram equalization", command=self.histogram_equalization)
-        hist_transform_menu.add_command(label="binary tresh", command=self.binary_threshold)
-        hist_transform_menu.add_command(label="binary tresh gray", command=self.gray_threshold)
+        hist_transform_menu.add_command(label="binary thresholding", command=self.binary_threshold)
+        hist_transform_menu.add_command(label="thresholding with preservation of gray levels", command=self.gray_threshold)
 
         point_ops_menu = tk.Menu(self.menu)
         self.menu.add_cascade(label="Point Operations", menu=point_ops_menu)
@@ -63,7 +63,7 @@ class ImageViewer:
         point_ops_menu.add_command(label="Absolute Difference", command=self.setup_absolute_difference)
 
         cv_menu = tk.Menu(self.menu)
-        self.menu.add_cascade(label="Cv2", menu=cv_menu)
+        self.menu.add_cascade(label="sharpen/unsharpen", menu=cv_menu)
         cv_menu.add_command(label="average", command=lambda: self.setup_neighbor_operation("average"))
         cv_menu.add_command(label="weighted average",
                             command=lambda: self.setup_neighbor_operation("weighted"))
@@ -91,7 +91,7 @@ class ImageViewer:
         lab3.add_command(label="skeletonize", command=self.setup_skeletonization)
 
         lab4 = tk.Menu(self.menu)
-        self.menu.add_cascade(label="lab4", menu=lab4)
+        self.menu.add_cascade(label="Lab4", menu=lab4)
         lab4.add_command(label="moments", command=self.calculate_moments)
         lab4.add_command(label="Hought", command=self.hough_edge_detection)
 
@@ -99,7 +99,6 @@ class ImageViewer:
             self.images.append(img.copy())
             self.current_image_index = 0
             self.display_image()
-
 
     def grayscale_narrowing(self, image, low: int, high: int) -> np.ndarray:
         arr = np.array(image)
@@ -584,9 +583,14 @@ class ImageViewer:
             "with wysycenie?"
         )
 
-        # if self.images:
-        #     current = self.images[self.current_image_index]
-        #     images_to_process.append(current.convert("L"))
+        if self.images:
+            useLoadedImage = messagebox.askyesno(
+                "choice",
+                "use the currently loaded in image?"
+            )
+            if useLoadedImage:
+                current = self.images[self.current_image_index]
+                images_to_process.append(current.convert("L"))
 
         slots_left = 5 - len(images_to_process)
         if slots_left <= 0:
@@ -1486,6 +1490,11 @@ class ImageViewer:
                 if not (0 <= border_value <= 255):
                     messagebox.showerror("Error", "0-255.", parent=dialog_window)
                     return
+
+                if kernel_size % 2 == 0:
+                    messagebox.showerror("Error", "Kernel size must be uneven", parent=dialog_window)
+                    return
+
             except ValueError:
                 messagebox.showerror("Error", "whole number", parent=dialog_window)
                 return
@@ -1508,7 +1517,7 @@ class ImageViewer:
         kernel_frame.pack(padx=10, pady=5, fill='x')
 
         # suwak :D
-        tk.Scale(kernel_frame, from_=3, to=9, resolution=2, orient=tk.HORIZONTAL,
+        tk.Scale(kernel_frame, from_=3, to=9, resolution=1, orient=tk.HORIZONTAL,
                  variable=kernel_size_var, label="").pack(fill='x')
 
         tk.Button(dialog_window, text="Set", command=apply_settings).pack(pady=10)

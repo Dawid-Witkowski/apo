@@ -5,12 +5,18 @@ from PIL import Image, ImageTk
 import statistics
 import cv2
 import xlsxwriter
+import os
 
 
 class ImageViewer:
+
+    DEFAULT_WIDTH = 700
+    DEFAULT_HEIGHT = 500
+
     def __init__(self, root, img=None):
         self.root = root
         self.root.title("Image Viewer")
+        self.root.geometry(f"{self.DEFAULT_WIDTH}x{self.DEFAULT_HEIGHT}")
         self.images = []
         self.isGrayscale = []
         self.current_image_index = 0
@@ -46,7 +52,8 @@ class ImageViewer:
 
         hist_transform_menu.add_command(label="Histogram equalization", command=self.histogram_equalization)
         hist_transform_menu.add_command(label="binary thresholding", command=self.binary_threshold)
-        hist_transform_menu.add_command(label="thresholding with preservation of gray levels", command=self.gray_threshold)
+        hist_transform_menu.add_command(label="thresholding with preservation of gray levels",
+                                        command=self.gray_threshold)
 
         point_ops_menu = tk.Menu(self.menu)
         self.menu.add_cascade(label="Point Operations", menu=point_ops_menu)
@@ -99,11 +106,6 @@ class ImageViewer:
             self.images.append(img.copy())
             self.current_image_index = 0
             self.display_image()
-
-    def grayscale_narrowing(self, image, low: int, high: int) -> np.ndarray:
-        arr = np.array(image)
-        narrowed = (arr * ((high - low) / 255) + low).astype('uint8')
-        return narrowed
 
     def load_image(self):
         filepath = filedialog.askopenfilename(filetypes=[("Images", "*.bmp *.tif *.png *.jpg")])
@@ -186,7 +188,8 @@ class ImageViewer:
             return
         img = self.images[self.current_image_index]
         img_tk = ImageTk.PhotoImage(img)
-        self.root.geometry(f"{img.width}x{img.height}")
+        if img.width > self.DEFAULT_WIDTH or img.height > self.DEFAULT_HEIGHT:
+            self.root.geometry(f"{img.width}x{img.height}")
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=img_tk, anchor=tk.NW)
         self.canvas.image = img_tk
@@ -711,19 +714,12 @@ class ImageViewer:
 
         if not wysycenie:
             if operation == 'multiply':
-                # Normalizacja, max == 255
-                # P * V <= 255. V_max dla 255 to 1.
-                # max_P = floor(255 / V)
                 if abs(value) > 1:
                     max_P = 255 // abs(value)
                 else:
                     max_P = 255
-
-                # Wzór: P_new = P_old * (max_P / 255)
-                # Następnie: P_new * V, co da nam max 255.
                 scale_factor = max_P / 255.0
                 pixels = [int(p * scale_factor) for p in pixels]
-
 
         for p in pixels:
 
@@ -736,13 +732,10 @@ class ImageViewer:
             else:
                 continue
 
-            # 2. Zastosowanie wysycenia/normalizacji (obcięcie)
             if wysycenie or operation == 'add':
                 val = max(0, min(255, int(round(val))))
             else:
-                # Brak wysycenia/skalowanie (dla mnożenia/dzielenia, gdzie normalizacja
-                # została wykonana wstępnie lub jest naturalna).
-                # Nadal musimy pilnować zakresu 0-255.
+
                 val = max(0, min(255, int(round(val))))
 
             result_pixels.append(val)
@@ -1342,7 +1335,6 @@ class ImageViewer:
         try:
             img_np = np.array(img, dtype=np.float32)
 
-            # 2. Definicja masek Sobela
             # Maska dla gradientu w kierunku X (wykrywa krawędzie pionowe)
             kernel_x = np.array([
                 [-1, 0, 1],
@@ -1379,23 +1371,13 @@ class ImageViewer:
                 kernel=kernel_y
             )
 
-            # 5. Obliczenie Magnitudy Gradientu
-            # Magnituda M = sqrt(G_x^2 + G_y^2)
-            # Należy użyć funkcji np.hypot, która jest numerycznie stabilniejsza niż ręczne sqrt(a**2 + b**2)
             magnitude = np.hypot(G_x, G_y)
 
-            # 6. Normalizacja i skalowanie do zakresu 0-255 (uint8)
-            # Maksymalna możliwa wartość magnitudy Sobela dla obrazu uint8 wynosi ok. 1442.
-            # Musimy przeskalować wynik, aby mieścił się w zakresie 0-255.
-            # Najprostsza metoda: normalizacja do max/min, a następnie skalowanie
-
-            # Wartości muszą być > 0, aby można było je przeskalować.
             max_val = np.max(magnitude)
             if max_val > 0:
-                # Skalowanie: M_skala = (M / max_val) * 255
                 normalized_magnitude = (magnitude / max_val) * 255
             else:
-                normalized_magnitude = magnitude  # Zostaje 0
+                normalized_magnitude = magnitude
 
             result_np = normalized_magnitude.astype(np.uint8)
 
@@ -1963,14 +1945,11 @@ class ImageViewer:
     def perform_morphology(self, img, operation, shape_type):
         try:
             img_np = np.array(img)
-            kernel = None
 
             if shape_type == 'rect':
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
             else:
                 kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-
-            result_np = None
 
             if operation == 'erosion':
                 result_np = cv2.erode(img_np, kernel, iterations=1)
@@ -2104,9 +2083,32 @@ class ImageViewer:
             sheet.write(0, base_col + 4, "Solidity")
             sheet.write(0, base_col + 5, "EquivalentDiameter")
 
+            display_img = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+
             # Rows
             for idx, contour in enumerate(contours, start=1):
+
+                # mark all contours :)
+                cv2.drawContours(display_img, [contour], -1, (0, 255, 0), 2)
+
                 moments = cv2.moments(contour)
+                if moments["m00"] != 0:
+                    cx = int(moments["m10"] / moments["m00"])
+                    cy = int(moments["m01"] / moments["m00"])
+                else:
+                    # ... division by 0 my beloved
+                    x, y, w, h = cv2.boundingRect(contour)
+                    cx, cy = x + w // 2, y + h // 2
+
+                cv2.putText(display_img, str(idx), (cx, cy),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+                final_pil = Image.fromarray(display_img)
+                self.images.append(final_pil.convert("RGB"))
+                self.isGrayscale.append(False)
+                self.current_image_index = len(self.images) - 1
+                self.display_image()
+
                 area = cv2.contourArea(contour)
                 perimeter = cv2.arcLength(contour, True)
 
@@ -2136,6 +2138,12 @@ class ImageViewer:
             workbook.close()
 
         messagebox.showinfo("Success", f"Shapes saved to {filepath}")
+
+        # try to open the file, so we don't have to search for it:)
+        try:
+            os.startfile(filepath)
+        except Exception:
+            pass
 
     def hough_edge_detection(self, canny_threshold1=50, canny_threshold2=150, hough_threshold=100):
         if not self.images:
@@ -2168,8 +2176,8 @@ class ImageViewer:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    root.withdraw()
+    main = tk.Tk()
+    main.withdraw()
     first_window = tk.Toplevel()
     app = ImageViewer(first_window)
-    root.mainloop()
+    main.mainloop()

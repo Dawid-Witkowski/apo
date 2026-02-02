@@ -102,6 +102,10 @@ class ImageViewer:
         lab4.add_command(label="moments", command=self.calculate_moments)
         lab4.add_command(label="Hought", command=self.hough_edge_detection)
 
+        metal = tk.Menu(self.menu)
+        self.menu.add_cascade(label="Metal objects", menu=metal)
+        metal.add_command(label="Detection (mini-project)", command=self.metal_object_separation_miniproject)
+
         if img:
             self.images.append(img.copy())
             self.current_image_index = 0
@@ -1551,7 +1555,7 @@ class ImageViewer:
         except Exception as e:
             messagebox.showerror("Error", f"{e}")
 
-    def setup_logic(self, needs_second_image=True):
+    def setup_logic(self, needs_second_image=True, ask_to_convert=True):
         if not self.images:
             messagebox.showwarning("No Image", "Load the first image first.")
             return None, None, None, False
@@ -1578,7 +1582,10 @@ class ImageViewer:
                 messagebox.showerror("Error", f"Could not load second image: {e}")
                 return None, None, None, False
 
-        binarize = messagebox.askyesno("Mode", "Convert to Binary?")
+        if ask_to_convert:
+            binarize = messagebox.askyesno("Mode", "Convert to Binary?")
+        else:
+            binarize = False
 
         if binarize:
             _, img1_np = cv2.threshold(img1_np, 127, 255, cv2.THRESH_BINARY)
@@ -1591,8 +1598,8 @@ class ImageViewer:
 
         return img1_np, img2_np, binarize, True
 
-    def perform_not(self):
-        img1_np, _, binarize, success = self.setup_logic(needs_second_image=False)
+    def perform_not(self, ask_to_convert=True):
+        img1_np, _, binarize, success = self.setup_logic(needs_second_image=False, ask_to_convert=ask_to_convert)
         if not success:
             return
 
@@ -1942,7 +1949,7 @@ class ImageViewer:
 
         tk.Button(morph_window, text="Set", command=apply_morphology, height=2, width=15).pack(pady=20)
 
-    def perform_morphology(self, img, operation, shape_type):
+    def perform_morphology(self, img, operation="erosion", shape_type="rect", iterations=1):
         try:
             img_np = np.array(img)
 
@@ -1952,10 +1959,10 @@ class ImageViewer:
                 kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
 
             if operation == 'erosion':
-                result_np = cv2.erode(img_np, kernel, iterations=1)
+                result_np = cv2.erode(img_np, kernel, iterations=iterations)
 
             elif operation == 'dilation':
-                result_np = cv2.dilate(img_np, kernel, iterations=1)
+                result_np = cv2.dilate(img_np, kernel, iterations=iterations)
 
             elif operation == 'opening':
                 result_np = cv2.morphologyEx(img_np, cv2.MORPH_OPEN, kernel)
@@ -2173,6 +2180,28 @@ class ImageViewer:
 
         except Exception as e:
             messagebox.showerror("Error", f"{e}")
+
+    def metal_object_separation_miniproject(self):
+        try:
+            # todo: note to self, would be great if those functions return the new image, then no need for image = ...
+            # 1: Gaussian filter
+            img = self.images[self.current_image_index]
+            self.perform_gaussowski_filter(img, 1, "reflect")
+
+            # 2: Otsu
+            img = self.images[self.current_image_index]
+            gray_np = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+            self.perform_otsu_thresholding(Image.fromarray(gray_np), False)
+
+            # 3: erosion to expand black objects
+            img = self.images[self.current_image_index]
+            self.perform_morphology(img, operation="erosion", iterations=2)
+
+            img = self.images[self.current_image_index]
+            self.images[self.current_image_index] = img
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
 
 if __name__ == "__main__":

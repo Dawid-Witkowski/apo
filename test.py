@@ -2182,6 +2182,10 @@ class ImageViewer:
             messagebox.showerror("Error", f"{e}")
 
     def metal_object_separation_miniproject(self):
+        if not self.images:
+            messagebox.showwarning("No Image", "No image to process")
+            return
+
         try:
             # todo: note to self, would be great if those functions return the new image, then no need for image = ...
             # 1: Gaussian filter
